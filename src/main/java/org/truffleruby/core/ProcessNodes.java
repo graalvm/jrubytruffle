@@ -27,7 +27,6 @@ public abstract class ProcessNodes {
     @Primitive(name = "process_time_nanotime")
     public abstract static class ProcessTimeNanoTimeNode extends PrimitiveArrayArgumentsNode {
 
-        @TruffleBoundary
         @Specialization
         protected long nanoTime() {
             return System.nanoTime();
