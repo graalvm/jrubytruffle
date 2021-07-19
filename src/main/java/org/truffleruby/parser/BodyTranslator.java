@@ -33,6 +33,8 @@ import org.truffleruby.core.array.ArrayLiteralNode;
 import org.truffleruby.core.array.AssignableNode;
 import org.truffleruby.core.array.MultipleAssignmentNode;
 import org.truffleruby.core.array.NoopAssignableNode;
+import org.truffleruby.core.cast.BooleanCastNode;
+import org.truffleruby.core.cast.BooleanCastNodeGen;
 import org.truffleruby.core.cast.HashCastNodeGen;
 import org.truffleruby.core.cast.SplatCastNode;
 import org.truffleruby.core.cast.SplatCastNodeGen;
@@ -74,6 +76,7 @@ import org.truffleruby.language.constants.ReadConstantWithDynamicScopeNode;
 import org.truffleruby.language.constants.ReadConstantWithLexicalScopeNode;
 import org.truffleruby.language.constants.WriteConstantNode;
 import org.truffleruby.language.control.AndNode;
+import org.truffleruby.language.control.AnyCaseNode;
 import org.truffleruby.language.control.BreakID;
 import org.truffleruby.language.control.BreakNode;
 import org.truffleruby.language.control.DeferredRaiseException;
@@ -759,10 +762,10 @@ public class BodyTranslator extends Translator {
             final ReadLocalNode readTemp = environment.findLocalVarNode(tempName, sourceSection);
             final RubyNode assignTemp = readTemp.makeWriteNode(node.getCaseNode().accept(this));
 
-            /* Build an if expression from the whens and else. Work backwards because the first if contains all the
-             * others in its else clause. */
+            final RubyNode[] conditions = new RubyNode[node.getCases().size()];
+            final RubyNode[] bodies = new RubyNode[node.getCases().size()];
 
-            for (int n = node.getCases().size() - 1; n >= 0; n--) {
+            for (int n = 0; n < node.getCases().size(); n++) {
                 final WhenParseNode when = (WhenParseNode) node.getCases().get(n);
 
                 // JRuby AST always gives WhenParseNode with only one expression.
@@ -795,16 +798,41 @@ public class BodyTranslator extends Translator {
 
                 // Create the if node
                 final RubyNode thenNode = translateNodeOrNil(sourceSection, when.getBodyNode());
-                final IfElseNode ifNode = new IfElseNode(conditionNode, thenNode, elseNode);
 
-                // This if becomes the else for the next if
-                elseNode = ifNode;
+                conditions[n] = conditionNode;
+                bodies[n] = thenNode;
             }
 
-            final RubyNode ifNode = elseNode;
+            final WhenParseNode firstWhen = (WhenParseNode) node.getCases().get(0);
+            final boolean anyCase = firstWhen instanceof WhenOneArgParseNode
+                    && firstWhen.getExpressionNodes() instanceof SymbolParseNode
+                    && ((SymbolParseNode) firstWhen.getExpressionNodes()).getName().equals("truffleruby_any_case");
 
-            // A top-level block assigns the temp then runs the if
-            ret = sequence(sourceSection, Arrays.asList(assignTemp, ifNode));
+            if (anyCase) {
+                final BooleanCastNode[] conditionCasts = new BooleanCastNode[conditions.length];
+                for (int n = 0; n < conditionCasts.length; n++) {
+                    conditionCasts[n] = BooleanCastNodeGen.create(conditions[n]);
+                }
+
+                ret = sequence(sourceSection, Arrays.asList(assignTemp, new AnyCaseNode(conditionCasts, bodies, elseNode)));
+            } else {
+                /* Build an if expression from the whens and else. Work backwards because the first if contains all the
+                 * others in its else clause. */
+
+                for (int n = node.getCases().size() - 1; n >= 0; n--) {
+                    // Create the if node
+                    final RubyNode thenNode = bodies[n];
+                    final IfElseNode ifNode = new IfElseNode(conditions[n], thenNode, elseNode);
+
+                    // This if becomes the else for the next if
+                    elseNode = ifNode;
+                }
+
+                final RubyNode ifNode = elseNode;
+
+                // A top-level block assigns the temp then runs the if
+                ret = sequence(sourceSection, Arrays.asList(assignTemp, ifNode));
+            }
         } else {
             for (int n = node.getCases().size() - 1; n >= 0; n--) {
                 final WhenParseNode when = (WhenParseNode) node.getCases().get(n);

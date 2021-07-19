@@ -156,6 +156,7 @@ module Process
     end
 
     case id
+    when :truffleruby_any_case
     when CLOCK_REALTIME
       time = Primitive.process_time_instant
     when CLOCK_MONOTONIC
@@ -170,6 +171,7 @@ module Process
 
   def self.nanoseconds_to_unit(nanoseconds, unit)
     case unit
+    when :truffleruby_any_case
     when :nanosecond
       nanoseconds
     when :microsecond
